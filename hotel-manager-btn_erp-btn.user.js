@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pylon: Hotel-Manager & ERP Button
 // @namespace    https://seekda.com
-// @version      1.0.1
+// @version      1.0.2
 // @description  Fügt in der Issue Sidebar unter der Hotel-ID eine Zeile mit zwei Buttons ein: links "🏨 Hotel-Manager", rechts "🧑‍🤝‍🧑 Verrechnungspartner …". Buttons werden bei Änderungen der Hotel-ID live angepasst.
 // @match        https://app.usepylon.com/issues/*
 // @run-at       document-idle
@@ -79,7 +79,7 @@
     const erpBtn = document.createElement("a");
     erpBtn.dataset.erpLink = "1";
     erpBtn.className = "button button--primary button--md";
-    erpBtn.textContent = "🧑‍🤝‍🧑 Verrechnungspartner …";
+    erpBtn.textContent = "🧑‍🤝‍🧑 Partner …";
     erpBtn.target = "blank";
     erpBtn.rel = "noopener noreferrer";
     erpBtn.style.whiteSpace = "nowrap";
@@ -155,7 +155,7 @@
     });
   }
 
-  function setErpButtonLoading(row, label = "🧑‍🤝‍🧑 Verrechnungspartner …") {
+  function setErpButtonLoading(row, label = "🧑‍🤝‍🧑 Partner …") {
     const btn = row.querySelector('a[data-erp-link]');
     if (!btn) return;
     btn.textContent = label;
@@ -169,7 +169,7 @@
   function setErpButtonReady(row, url, partnerId) {
     const btn = row.querySelector('a[data-erp-link]');
     if (!btn) return;
-    btn.textContent = `🧑‍🤝‍🧑 Verrechnungspartner ${partnerId}`;
+    btn.textContent = `🧑‍🤝‍🧑 Partner ${partnerId}`;
     btn.href = url;
     btn.setAttribute("aria-disabled", "false");
     btn.style.opacity = "1";
@@ -180,7 +180,7 @@
   function setErpButtonDisabled(row, reason = "nicht gefunden") {
     const btn = row.querySelector('a[data-erp-link]');
     if (!btn) return;
-    btn.textContent = `🧑‍🤝‍🧑 Verrechnungspartner (${reason})`;
+    btn.textContent = `🧑‍🤝‍🧑 Partner (${reason})`;
     btn.removeAttribute("href");
     btn.setAttribute("aria-disabled", "true");
     btn.style.opacity = "0.5";
@@ -200,7 +200,7 @@
   async function updateErpButton(row, hotelId) {
     const clean = (hotelId || "").trim();
     if (!ID_REGEX.test(clean)) {
-      setErpButtonDisabled(row, "ungültige Hotel-ID");
+      setErpButtonDisabled(row, "invalid Hotel-ID");
       return;
     }
     setErpButtonLoading(row);
