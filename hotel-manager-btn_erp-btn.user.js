@@ -6,6 +6,8 @@
 // @match        https://app.usepylon.com/issues/*
 // @run-at       document-idle
 // @author       you
+// @updateURL    https://raw.githubusercontent.com/mg-seekda/pylon-userscripts/main/pylon-zitat.user.js
+// @downloadURL  https://raw.githubusercontent.com/mg-seekda/pylon-userscripts/main/pylon-zitat.user.js
 // @grant        GM_xmlhttpRequest
 // @connect      hotels.seekda.com
 // ==/UserScript==
