@@ -131,7 +131,7 @@
     const btn = row.querySelector('a[data-erp-link]');
     if (!btn) return;
     btn.textContent = `🧑‍🤝‍🧑 Partner ${partnerId}`;
-    btn.href = `${HM_BASE}~/erpRedirect.do?partnerId=${partnerId}`;
+    btn.href = `https://erp.seekda.com/web#id=${partnerId}&view_type=form&model=res.partner`;
     btn.setAttribute("aria-disabled", "false");
     btn.style.opacity = "1";
     btn.style.pointerEvents = "auto";
