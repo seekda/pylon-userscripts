@@ -124,34 +124,31 @@
     }
   }
 
-  // ===== ERP aus HM-Startseite =====
-  function extractErpLink(htmlText) {
-    const doc = new DOMParser().parseFromString(htmlText, "text/html");
+function extractErpLink(htmlText) {
+  const doc = new DOMParser().parseFromString(htmlText, "text/html");
 
-    // Normaler Hotel-Fall
-    const anchors = Array.from(doc.querySelectorAll('a[href*="erpRedirect.do?partnerId="]'));
-    for (const a of anchors) {
-      const href = a.getAttribute("href") || "";
-      const m = href.match(/erpRedirect\.do\?partnerId=(\d+)/i);
-      if (m) {
-        const absolute = new URL(href, "https://hotels.seekda.com/").toString();
-        return { url: absolute, partnerId: m[1] };
-      }
+  // Fall 1: normales Hotel (Dashboard/Overview)
+  const normal = doc.querySelector('a[href*="erpRedirect.do?partnerId="]');
+  if (normal) {
+    const href = normal.getAttribute("href") || "";
+    const m = href.match(/partnerId=(\d+)/);
+    if (m) {
+      return { url: new URL(href, "https://hotels.seekda.com/").toString(), partnerId: m[1] };
     }
-
-    // Chain-Fall: spezieller <a class="icon ... bm-icon-users">
-    const chainIcon = doc.querySelector('a.icon[href*="erpRedirect.do?partnerId="]');
-    if (chainIcon) {
-      const href = chainIcon.getAttribute("href") || "";
-      const m = href.match(/erpRedirect\.do\?partnerId=(\d+)/i);
-      if (m) {
-        const absolute = new URL(href, "https://hotels.seekda.com/").toString();
-        return { url: absolute, partnerId: m[1] };
-      }
-    }
-
-    return null;
   }
+
+  // Fall 2: Chain (propertymanagement-Seite)
+  const chain = doc.querySelector('a.icon[href*="erpRedirect.do?partnerId="], a.bm-icon-users[href*="erpRedirect.do?partnerId="]');
+  if (chain) {
+    const href = chain.getAttribute("href") || "";
+    const m = href.match(/partnerId=(\d+)/);
+    if (m) {
+      return { url: new URL(href, "https://hotels.seekda.com/").toString(), partnerId: m[1] };
+    }
+  }
+
+  return null;
+}
 
   function fetchText(url) {
     return new Promise((resolve, reject) => {
