@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Pylon: Hotel-Manager & ERP Button (mit Chain iframe)
+// @name         Pylon: Hotel-Manager & ERP Button
 // @namespace    https://seekda.com
 // @version      1.0.7
 // @description  Fügt in der Issue Sidebar unter der Hotel-ID eine Zeile mit zwei Buttons ein: links "🏨 Hotel-Manager", rechts "🧑‍🤝‍🧑 Verrechnungspartner …". Buttons werden bei Änderungen der Hotel-ID live angepasst.
