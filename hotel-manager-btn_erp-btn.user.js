@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pylon: Hotel-Manager & ERP Button
 // @namespace    https://seekda.com
-// @version      1.0.2
+// @version      1.0.3
 // @description  Fügt in der Issue Sidebar unter der Hotel-ID eine Zeile mit zwei Buttons ein: links "🏨 Hotel-Manager", rechts "🧑‍🤝‍🧑 Verrechnungspartner …". Buttons werden bei Änderungen der Hotel-ID live angepasst.
 // @match        https://app.usepylon.com/issues/*
 // @run-at       document-idle
@@ -56,7 +56,7 @@
     row.className = "relative flex min-h-8 items-center gap-x-3 px-1.5";
     row.dataset.hmErpRow = "1";
 
-    // Linke Spalte: hier kommt der HM-Button hin (ersetzt das alte Label)
+    // Linke Spalte: hier kommt der HM-Button hin
     const left = document.createElement("div");
     left.className = "relative flex shrink-0 items-center gap-2";
     left.style.minWidth = "150px";
@@ -71,7 +71,7 @@
 
     left.appendChild(hmBtn);
 
-    // Rechte Spalte: hier der ERP-Button (wo vorher der HM-Button war)
+    // Rechte Spalte: hier der ERP-Button
     const right = document.createElement("div");
     right.className = "flex max-w-full min-w-0 flex-1";
     right.dataset.hmErpRight = "1";
@@ -127,6 +127,8 @@
   // ===== ERP aus HM-Startseite =====
   function extractErpLink(htmlText) {
     const doc = new DOMParser().parseFromString(htmlText, "text/html");
+
+    // Normaler Hotel-Fall
     const anchors = Array.from(doc.querySelectorAll('a[href*="erpRedirect.do?partnerId="]'));
     for (const a of anchors) {
       const href = a.getAttribute("href") || "";
@@ -136,6 +138,18 @@
         return { url: absolute, partnerId: m[1] };
       }
     }
+
+    // Chain-Fall: spezieller <a class="icon ... bm-icon-users">
+    const chainIcon = doc.querySelector('a.icon[href*="erpRedirect.do?partnerId="]');
+    if (chainIcon) {
+      const href = chainIcon.getAttribute("href") || "";
+      const m = href.match(/erpRedirect\.do\?partnerId=(\d+)/i);
+      if (m) {
+        const absolute = new URL(href, "https://hotels.seekda.com/").toString();
+        return { url: absolute, partnerId: m[1] };
+      }
+    }
+
     return null;
   }
 
