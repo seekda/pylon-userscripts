@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pylon: Hotel-Manager & ERP Button
 // @namespace    https://seekda.com
-// @version      1.0.4
+// @version      1.0.5
 // @description  Fügt in der Issue Sidebar unter der Hotel-ID eine Zeile mit zwei Buttons ein: links "🏨 Hotel-Manager", rechts "🧑‍🤝‍🧑 Verrechnungspartner …". Buttons werden bei Änderungen der Hotel-ID live angepasst.
 // @match        https://app.usepylon.com/issues/*
 // @run-at       document-idle
@@ -20,7 +20,9 @@
   const HOTEL_ID_LABEL_TEXTS = ["Hotel-ID", "Hotel ID"];
   const ID_REGEX = /^[A-Za-z0-9_-]{3,}$/;
 
-  const buildHmUrl = (id) => `https://hotels.seekda.com/~/cm/${encodeURIComponent(id)}`;
+  const HM_BASE = "https://hotels.seekda.com/";
+  const buildHmUrl = (id) => `${HM_BASE}~/cm/${encodeURIComponent(id)}`;
+  const buildMasterUrl = (id) => `${HM_BASE}master/${encodeURIComponent(id)}/propertymanagement?redirected=true`;
 
   // ===== Helpers =====
   const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -56,7 +58,7 @@
     row.className = "relative flex min-h-8 items-center gap-x-3 px-1.5";
     row.dataset.hmErpRow = "1";
 
-    // Linke Spalte: hier kommt der HM-Button hin
+    // Linke Spalte: HM-Button
     const left = document.createElement("div");
     left.className = "relative flex shrink-0 items-center gap-2";
     left.style.minWidth = "150px";
@@ -71,7 +73,7 @@
 
     left.appendChild(hmBtn);
 
-    // Rechte Spalte: hier der ERP-Button
+    // Rechte Spalte: ERP-Button
     const right = document.createElement("div");
     right.className = "flex max-w-full min-w-0 flex-1";
     right.dataset.hmErpRight = "1";
@@ -124,32 +126,47 @@
     }
   }
 
-function extractErpLink(htmlText) {
-  const doc = new DOMParser().parseFromString(htmlText, "text/html");
-
-  // Fall 1: normales Hotel (Dashboard/Overview)
-  const normal = doc.querySelector('a[href*="erpRedirect.do?partnerId="]');
-  if (normal) {
-    const href = normal.getAttribute("href") || "";
-    const m = href.match(/partnerId=(\d+)/);
-    if (m) {
-      return { url: new URL(href, "https://hotels.seekda.com/").toString(), partnerId: m[1] };
-    }
+  // ===== ERP-Link-Extraktion (robust + Debug) =====
+  function parseHrefToErp(href, sourceTag = "unknown") {
+    if (!href) return null;
+    const m = href.match(/erpRedirect\.do\?partnerId=(\d+)/i);
+    if (!m) return null;
+    const url = new URL(href, HM_BASE).toString();
+    console.debug("[Pylon HM+ERP] extractErpLink: Treffer via", sourceTag, "→", url, "PartnerId:", m[1]);
+    return { url, partnerId: m[1] };
   }
 
-  // Fall 2: Chain (propertymanagement-Seite)
-  const chain = doc.querySelector('a.icon[href*="erpRedirect.do?partnerId="], a.bm-icon-users[href*="erpRedirect.do?partnerId="]');
-  if (chain) {
-    const href = chain.getAttribute("href") || "";
-    const m = href.match(/partnerId=(\d+)/);
+  function extractErpLink(htmlText) {
+    const doc = new DOMParser().parseFromString(htmlText, "text/html");
+
+    // 1) Generischer Suchtreffer (normale Hotel-Seite)
+    const aGeneric = doc.querySelector('a[href*="erpRedirect.do?partnerId="]');
+    const fromGeneric = parseHrefToErp(aGeneric && aGeneric.getAttribute("href"), 'a[href*="erpRedirect.do?partnerId="]');
+    if (fromGeneric) return fromGeneric;
+
+    // 2) Chain-Icon (propertymanagement-Seite) – <a class="icon"><span class="bm-icon-users"></span></a>
+    const aChainIcon = doc.querySelector('a.icon[href*="erpRedirect.do?partnerId="]');
+    const fromChainIcon = parseHrefToErp(aChainIcon && aChainIcon.getAttribute("href"), 'a.icon[href*="erpRedirect.do?partnerId="]');
+    if (fromChainIcon) return fromChainIcon;
+
+    // 3) Anker mit Titel-Hinweis "Abrechnungspartner"
+    const aWithTitle = doc.querySelector('a[title*="Abrechnungspartner"][href*="erpRedirect.do?partnerId="]');
+    const fromTitle = parseHrefToErp(aWithTitle && aWithTitle.getAttribute("href"), 'a[title*="Abrechnungspartner"][href*="erpRedirect.do?partnerId="]');
+    if (fromTitle) return fromTitle;
+
+    // 4) Fallback: Rohregex im gesamten HTML (falls Link in Inline-JSON/Snippet)
+    const m = htmlText.match(/erpRedirect\.do\?partnerId=(\d+)/i);
     if (m) {
-      return { url: new URL(href, "https://hotels.seekda.com/").toString(), partnerId: m[1] };
+      const url = new URL(`/~/erpRedirect.do?partnerId=${m[1]}`, HM_BASE).toString();
+      console.debug("[Pylon HM+ERP] extractErpLink: Regex-Fallback →", url, "PartnerId:", m[1]);
+      return { url, partnerId: m[1] };
     }
+
+    console.debug("[Pylon HM+ERP] extractErpLink: Kein Treffer in HTML.");
+    return null;
   }
 
-  return null;
-}
-
+  // ===== HTTP (mit Debug-Infos) =====
   function fetchText(url) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
@@ -157,11 +174,18 @@ function extractErpLink(htmlText) {
         url,
         headers: { "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
         onload: (res) => {
-          if (res.status >= 200 && res.status < 300) resolve(res.responseText);
-          else reject(new Error(`HTTP ${res.status}`));
+          const finalUrl = res.finalUrl || url;
+          console.debug("[Pylon HM+ERP] HTTP OK", { requestUrl: url, finalUrl, status: res.status, length: (res.responseText || "").length });
+          resolve({ text: res.responseText, finalUrl, status: res.status });
         },
-        onerror: reject,
-        ontimeout: () => reject(new Error("timeout")),
+        onerror: (e) => {
+          console.debug("[Pylon HM+ERP] HTTP Fehler", { requestUrl: url, error: e });
+          reject(e);
+        },
+        ontimeout: () => {
+          console.debug("[Pylon HM+ERP] HTTP Timeout", { requestUrl: url });
+          reject(new Error("timeout"));
+        },
       });
     });
   }
@@ -210,18 +234,41 @@ function extractErpLink(htmlText) {
 
   async function updateErpButton(row, hotelId) {
     const clean = (hotelId || "").trim();
+    console.debug("[Pylon HM+ERP] updateErpButton: Start für ID:", clean);
+
     if (!ID_REGEX.test(clean)) {
       setErpButtonDisabled(row, "invalid Hotel-ID");
+      console.debug("[Pylon HM+ERP] updateErpButton: Abbruch – ungültige Hotel-ID");
       return;
     }
+
     setErpButtonLoading(row);
+
     try {
+      // 1) Standard HM-URL abrufen (Tampermonkey folgt Redirects)
       const hmUrl = buildHmUrl(clean);
-      const html = await fetchText(hmUrl);
-      const erp = extractErpLink(html);
+      const r1 = await fetchText(hmUrl);
+      console.debug("[Pylon HM+ERP] Inhalt (Head, r1):", (r1.text || "").substring(0, 1000));
+
+      let erp = extractErpLink(r1.text);
+
+      // 2) Fallback: Wenn nichts gefunden und es sieht nach Chain aus, versuche /master/<ID>/propertymanagement
+      const looksLikeChain = /^chain/i.test(clean) || /\/master\//i.test(r1.finalUrl);
+      if (!erp && looksLikeChain) {
+        const masterUrl = buildMasterUrl(clean);
+        console.debug("[Pylon HM+ERP] Fallback-Request auf Master-URL:", masterUrl);
+        const r2 = await fetchText(masterUrl);
+        console.debug("[Pylon HM+ERP] Inhalt (Head, r2):", (r2.text || "").substring(0, 1000));
+        erp = extractErpLink(r2.text);
+      }
+
       if (erp && erp.url && erp.partnerId) {
         setErpButtonReady(row, erp.url, erp.partnerId);
+        console.debug("[Pylon HM+ERP] ERP-Link gesetzt:", erp);
       } else {
+        // Noch etwas Diagnose: PartnerId-Hinweis?
+        const hint = ((r1.text || "").match(/partnerId=(\d+)/i) || [])[1];
+        console.debug("[Pylon HM+ERP] Kein ERP-Link gefunden. Hinweis partnerId (r1):", hint || null);
         setErpButtonDisabled(row, "nicht gefunden");
       }
     } catch (e) {
