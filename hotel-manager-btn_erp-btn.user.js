@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pylon: Hotel-Manager & ERP Button
 // @namespace    https://seekda.com
-// @version      1.1.1
+// @version      1.1.2
 // @description  Fügt in der Issue Sidebar unter der Hotel-ID eine Zeile mit zwei Buttons ein: links "🏨 Hotel-Manager", rechts "🧑‍🤝‍🧑 Verrechnungspartner …". ERP-Partner werden über Redash API gecached.
 // @match        https://app.usepylon.com/issues/*
 // @run-at       document-idle
