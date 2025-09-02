@@ -1,14 +1,15 @@
 // ==UserScript==
 // @name         Pylon: Hotel-Manager & ERP Button
 // @namespace    https://seekda.com
-// @version      1.0.7
-// @description  Fügt in der Issue Sidebar unter der Hotel-ID eine Zeile mit zwei Buttons ein: links "🏨 Hotel-Manager", rechts "🧑‍🤝‍🧑 Verrechnungspartner …". Buttons werden bei Änderungen der Hotel-ID live angepasst.
+// @version      1.1.0
+// @description  Fügt in der Issue Sidebar unter der Hotel-ID eine Zeile mit zwei Buttons ein: links "🏨 Hotel-Manager", rechts "🧑‍🤝‍🧑 Verrechnungspartner …". ERP-Link über persistenten Cache und Analytics-Query.
 // @match        https://app.usepylon.com/issues/*
 // @run-at       document-idle
 // @author       you
 // @updateURL    https://raw.githubusercontent.com/mg-seekda/pylon-userscripts/main/hotel-manager-btn_erp-btn.user.js
 // @downloadURL  https://raw.githubusercontent.com/mg-seekda/pylon-userscripts/main/hotel-manager-btn_erp-btn.user.js
 // @grant        GM_xmlhttpRequest
+// @connect      analytics.seekda.com
 // @connect      hotels.seekda.com
 // ==/UserScript==
 
@@ -18,10 +19,12 @@
   const HOTEL_ID_PLACEHOLDER = "Hotel-ID";
   const HOTEL_ID_LABEL_TEXTS = ["Hotel-ID", "Hotel ID"];
   const ID_REGEX = /^[A-Za-z0-9_-]{3,}$/;
-
   const HM_BASE = "https://hotels.seekda.com/";
+  const ANALYTICS_URL = "http://analytics.seekda.com/api/queries/2983/results.json?api_key=wsEZCx6Y4E2pnuuWBGeHDjxtnVOs1rtGve5Ge545";
+  const CACHE_KEY = "hmErpCache";
+  const CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
+
   const buildHmUrl = (id) => `${HM_BASE}~/cm/${encodeURIComponent(id)}`;
-  const buildMasterUrl = (id) => `${HM_BASE}master/${encodeURIComponent(id)}/propertymanagement?redirected=true`;
 
   const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const textEq = (el, s) => ((el.textContent || "").trim().toLowerCase() === s.toLowerCase());
@@ -120,10 +123,10 @@
     }
   }
 
-  function setErpButtonLoading(row, label = "🧑‍🤝‍🧑 Partner …") {
+  function setErpButtonLoading(row) {
     const btn = row.querySelector('a[data-erp-link]');
     if (!btn) return;
-    btn.textContent = label;
+    btn.textContent = "🧑‍🤝‍🧑 Partner …";
     btn.removeAttribute("href");
     btn.setAttribute("aria-disabled", "true");
     btn.style.opacity = "0.5";
@@ -153,81 +156,59 @@
     btn.title = `ERP-Link ${reason}`;
   }
 
-  function parseHrefToErp(href, sourceTag = "unknown") {
-    if (!href) return null;
-    const m = href.match(/erpRedirect\.do\?partnerId=(\d+)/i);
-    if (!m) return null;
-    const url = new URL(href, HM_BASE).toString();
-    console.debug("[Pylon HM+ERP] extractErpLink: Treffer via", sourceTag, "→", url, "PartnerId:", m[1]);
-    return { url, partnerId: m[1] };
-  }
-
-  function extractErpLinkFromHtml(htmlText) {
-    const doc = new DOMParser().parseFromString(htmlText, "text/html");
-    const selectors = [
-      'a[href*="erpRedirect.do?partnerId="]',
-      'a.icon[href*="erpRedirect.do?partnerId="]',
-      'a[title*="Abrechnungspartner"][href*="erpRedirect.do?partnerId="]'
-    ];
-    for (const sel of selectors) {
-      const a = doc.querySelector(sel);
-      const found = parseHrefToErp(a && a.getAttribute("href"), sel);
-      if (found) return found;
+  // ===== Cache =====
+  function loadCache() {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (Date.now() - obj.timestamp > CACHE_TTL) return null;
+      return new Map(obj.data);
+    } catch (e) {
+      console.error("Fehler beim Laden des ERP-Caches", e);
+      return null;
     }
-    const m = htmlText.match(/erpRedirect\.do\?partnerId=(\d+)/i);
-    if (m) return { url: new URL(`/~/erpRedirect.do?partnerId=${m[1]}`, HM_BASE).toString(), partnerId: m[1] };
-    return null;
   }
 
-  async function fetchText(url) {
-    return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
-        method: "GET",
-        url,
-        headers: { "Accept": "text/html" },
-        onload: (res) => resolve({ text: res.responseText, finalUrl: res.finalUrl || url, status: res.status }),
-        onerror: reject,
-        ontimeout: () => reject(new Error("timeout"))
+  function saveCache(map) {
+    try {
+      const obj = { timestamp: Date.now(), data: Array.from(map.entries()) };
+      localStorage.setItem(CACHE_KEY, JSON.stringify(obj));
+    } catch (e) {
+      console.error("Fehler beim Speichern des ERP-Caches", e);
+    }
+  }
+
+  async function fetchErpData() {
+    try {
+      const r = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: "GET",
+          url: ANALYTICS_URL,
+          headers: { "Accept": "application/json" },
+          onload: res => resolve(JSON.parse(res.responseText)),
+          onerror: reject,
+          ontimeout: () => reject(new Error("timeout"))
+        });
       });
-    });
-  }
 
-  function extractErpFromIframe(url, row) {
-    return new Promise((resolve) => {
-      const iframe = document.createElement("iframe");
-      iframe.style.display = "none";
-      iframe.src = url;
-      document.body.appendChild(iframe);
+      const map = new Map();
+      r.forEach(item => {
+        const hid = (item.name || "").trim();
+        const pid = (item.account_partner_id || "").trim();
+        if (hid && pid) map.set(hid, pid);
+      });
 
-      const timeout = setTimeout(() => {
-        console.debug("[Pylon HM+ERP] iframe Timeout, Partner nicht gefunden");
-        document.body.removeChild(iframe);
-        resolve(null);
-      }, 8000); // max 8 Sekunden warten
-
-      iframe.onload = () => {
-        try {
-          const doc = iframe.contentDocument || iframe.contentWindow.document;
-          const a = doc.querySelector('a.icon[href*="erpRedirect.do?partnerId="]');
-          const erp = parseHrefToErp(a && a.getAttribute("href"), "iframe");
-          clearTimeout(timeout);
-          document.body.removeChild(iframe);
-          if (erp) console.debug("[Pylon HM+ERP] ERP-Link aus iframe:", erp);
-          resolve(erp || null);
-        } catch (e) {
-          clearTimeout(timeout);
-          document.body.removeChild(iframe);
-          console.error("[Pylon HM+ERP] Fehler iframe:", e);
-          resolve(null);
-        }
-      };
-    });
+      saveCache(map);
+      return map;
+    } catch (e) {
+      console.error("Fehler beim Laden der ERP-Daten", e);
+      return new Map();
+    }
   }
 
   async function updateErpButton(row, hotelId) {
     const clean = (hotelId || "").trim();
-    console.debug("[Pylon HM+ERP] updateErpButton: Start für ID:", clean);
-
     if (!ID_REGEX.test(clean)) {
       setErpButtonDisabled(row, "invalid Hotel-ID");
       return;
@@ -235,33 +216,21 @@
 
     setErpButtonLoading(row);
 
-    try {
-      const hmUrl = buildHmUrl(clean);
-      const r1 = await fetchText(hmUrl);
+    let map = loadCache();
+    if (!map) map = await fetchErpData();
 
-      let erp = extractErpFromHtml(r1.text);
-
-      const looksLikeChain = /^chain/i.test(clean);
-      if (!erp && looksLikeChain) {
-        const masterUrl = buildMasterUrl(clean);
-        console.debug("[Pylon HM+ERP] Chain detected, lade iframe:", masterUrl);
-        erp = await extractErpFromIframe(masterUrl, row);
-      }
-
-      if (erp && erp.url && erp.partnerId) {
-        setErpButtonReady(row, erp.url, erp.partnerId);
-      } else {
-        setErpButtonDisabled(row, "nicht gefunden");
-      }
-    } catch (e) {
-      console.error("[Pylon HM+ERP] Fehler beim Laden:", e);
-      setErpButtonDisabled(row, "Fehler beim Laden");
+    let partnerId = map.get(clean);
+    if (!partnerId) {
+      map = await fetchErpData();
+      partnerId = map.get(clean);
     }
-  }
 
-  function setBothButtons(row, hotelId) {
-    setHmButton(row, hotelId);
-    debounce(row, () => updateErpButton(row, hotelId), 450);
+    if (partnerId) {
+      const url = `${HM_BASE}~/erpRedirect.do?partnerId=${partnerId}`;
+      setErpButtonReady(row, url, partnerId);
+    } else {
+      setErpButtonDisabled(row, "nicht gefunden");
+    }
   }
 
   const debounceMap = new Map();
@@ -272,6 +241,11 @@
     debounceMap.set(key, t);
   }
 
+  function setBothButtons(row, hotelId) {
+    setHmButton(row, hotelId);
+    debounce(row, () => updateErpButton(row, hotelId), 450);
+  }
+
   function bindToInput(input) {
     if (input.dataset._hmErpBound) return;
     input.dataset._hmErpBound = "1";
@@ -280,6 +254,7 @@
     if (!row) return;
 
     const companion = findOrCreateCompanionRow(row);
+
     setBothButtons(companion, input.value || "");
 
     const handler = () => setBothButtons(companion, input.value || "");
@@ -325,5 +300,9 @@
       processRoot(document);
     });
   });
-  mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  mo.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
 })();
