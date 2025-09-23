@@ -1,14 +1,17 @@
 // ==UserScript==
-// @name         Pylon: Hotel-Manager & ERP Button
+// @name         Pylon: Hotel-Manager & ERP Button (no exposed API key)
 // @namespace    https://seekda.com
 // @version      1.4.0
-// @description  Fügt unter der Hotel-ID eine eigene Row mit zwei Buttons ein (HM & ERP). Robust gegen DOM-Änderungen: Input/Textarea/Read-only + Textscan.
+// @description  Fügt unter der Hotel-ID eine eigene Row mit zwei Buttons ein (HM & ERP). API-Key wird nicht im Script gespeichert — Nutzer setzt ihn einmal per Menü.
 // @match        https://app.usepylon.com/issues/*
 // @run-at       document-idle
 // @author       you
 // @updateURL    https://raw.githubusercontent.com/mg-seekda/pylon-userscripts/main/hotel-manager-btn_erp-btn.user.js
 // @downloadURL  https://raw.githubusercontent.com/mg-seekda/pylon-userscripts/main/hotel-manager-btn_erp-btn.user.js
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
 // @connect      analytics.seekda.com
 // ==/UserScript==
 
@@ -20,10 +23,58 @@
   const ID_REGEX_INLINE = /([A-Za-z0-9_-]{3,})/;
   const VALID_ID_REGEX = /^[A-Za-z0-9_-]{3,}$/;
   const HM_BASE = "https://hotels.seekda.com/";
-  const ANALYTICS_URL = "https://analytics.seekda.com/api/queries/2983/results.json?api_key=wsEZCx6Y4E2pnuuWBGeHDjxtnVOs1rtGve5Ge545";
+  // NOTE: API key is NOT hardcoded. We'll build the analytics URL using the stored key.
+  const ANALYTICS_BASE = "https://analytics.seekda.com/api/queries/2983/results.json";
 
   const buildHmUrl = id => `${HM_BASE}~/cm/${encodeURIComponent(id)}`;
   const norm = s => (s || "").replace(/\s+/g, " ").trim();
+
+  // Helpers for API key storage & menu
+  const STORAGE_KEY = "pylon_analytics_api_key";
+
+  function getStoredApiKey() {
+    try {
+      const k = GM_getValue(STORAGE_KEY, "");
+      return typeof k === "string" ? k.trim() : "";
+    } catch (e) {
+      console.warn("Could not read stored API key", e);
+      return "";
+    }
+  }
+
+  function setStoredApiKey(k) {
+    try {
+      GM_setValue(STORAGE_KEY, (k || "").trim());
+    } catch (e) {
+      console.error("Could not store API key", e);
+    }
+  }
+
+  function buildAnalyticsUrlWithKey(key) {
+    if (!key) return null;
+    // Append api_key as query param
+    const url = new URL(ANALYTICS_BASE);
+    url.searchParams.set("api_key", key);
+    return url.toString();
+  }
+
+  // Register menu to set/clear API key
+  GM_registerMenuCommand("Set analytics API key", () => {
+    try {
+      const current = getStoredApiKey();
+      const val = prompt("Paste your analytics API key (will be stored locally):", current || "");
+      if (val === null) return; // user cancelled
+      setStoredApiKey(val);
+      alert(val ? "API key saved (local)." : "API key cleared.");
+      // optionally clear cache when key changed
+      try { localStorage.removeItem("_pylon_erp_cache"); } catch {}
+      // trigger a scan to update buttons
+      requestAnimationFrame(() => processRoot(document));
+    } catch (e) {
+      console.error(e);
+      alert("Failed to save API key in this userscript environment.");
+    }
+  });
 
   // === Helpers ===
   const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -31,7 +82,9 @@
   const textsLower = HOTEL_ID_TEXTS.map(t => t.toLowerCase());
   const looksLikeHotelLabel = el => textsLower.includes(norm(el.textContent).toLowerCase());
 
-  // findet die äußere Feld-ROW (dein Beispiel: 'relative flex min-h-8 items-center gap-x-3 px-1.5')
+  // ... (findFieldRow, closestRow, createCompanionRow, etc. — unchanged) ...
+
+  // findFieldRow (unchanged)
   function findFieldRow(el) {
     if (!el) return null;
     let cur = el;
@@ -51,7 +104,6 @@
     return null;
   }
 
-  // etwas großzügigerer Row-Finder als Fallback
   function closestRow(el) {
     return el?.closest?.(
       [
@@ -66,9 +118,7 @@
     ) || el?.parentElement || null;
   }
 
-  // === UI: Buttons ===
   function createCompanionRow() {
-    // gleiche Grundstruktur wie die Feld-Row
     const row = document.createElement("div");
     row.dataset.hmErpRow = "1";
     row.className = "relative flex min-h-8 items-center gap-x-3 px-1.5";
@@ -108,12 +158,10 @@
     return row;
   }
 
-  // **WICHTIG**: immer NACH der äußeren Feld-Row einfügen, nicht in deren rechter Spalte
   function findOrCreateCompanionRow(anchorEl) {
     const fieldRow = findFieldRow(anchorEl) || closestRow(anchorEl);
     if (!fieldRow || !fieldRow.parentElement) return null;
 
-    // Falls bereits vorhanden: direktes Sibling prüfen
     const next = fieldRow.nextElementSibling;
     if (next?.dataset?.hmErpRow === "1") return next;
 
@@ -184,10 +232,18 @@
     const cached = loadCache();
     if (cached.size > 0) return cached;
     try {
+      const apiKey = getStoredApiKey();
+      const analyticsUrl = buildAnalyticsUrlWithKey(apiKey);
+      if (!analyticsUrl) {
+        // no key configured -> return empty map
+        console.warn("No analytics API key configured for ERP lookup.");
+        return new Map();
+      }
+
       const r = await new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
           method: "GET",
-          url: ANALYTICS_URL,
+          url: analyticsUrl,
           headers: { "Accept": "application/json" },
           onload: res => { try { resolve(JSON.parse(res.responseText)); } catch(e){ reject(e); } },
           onerror: reject,
@@ -215,6 +271,13 @@
       setErpButtonDisabled(row, "invalid Hotel-ID");
       return;
     }
+
+    const apiKey = getStoredApiKey();
+    if (!apiKey) {
+      setErpButtonDisabled(row, "no API key");
+      return;
+    }
+
     setErpButtonLoading(row);
     const map = await fetchErpData();
     const partnerId = map.get(clean);
@@ -236,7 +299,6 @@
 
   // === Feld-/Wert-Finder (mehrstufig) ===
   function getHotelFieldCandidates(root=document) {
-    // Inputs & Textareas via placeholder/name/aria
     const sel = 'input[placeholder],textarea[placeholder],input[name],textarea[name],input[aria-label],textarea[aria-label]';
     return qsa(sel, root).filter(el => {
       const ph = (el.getAttribute('placeholder')||'').toLowerCase();
@@ -298,7 +360,6 @@
     const apply = () => setBothButtons(companion, getter() || "");
     apply();
 
-    // Live-Updates: Änderungen am Feld-Row beobachten
     const fieldRow = findFieldRow(anchor) || closestRow(anchor) || anchor;
     const mo = new MutationObserver(apply);
     mo.observe(fieldRow, { childList: true, subtree: true, characterData: true, attributes: true });
@@ -310,19 +371,16 @@
   }
 
   function processRoot(root=document) {
-    // 1) Direkte Felder
     const fields = getHotelFieldCandidates(root);
     if (fields.length) {
       fields.forEach(f => bindDynamic(f, () => f.value || ""));
       return;
     }
-    // 2) Label-Fallback
     const byLabel = findByLabel(root);
     if (byLabel) {
       bindDynamic(byLabel.anchor, byLabel.getter);
       return;
     }
-    // 3) Brute-Force-Scan
     const brute = bruteForceScan(root);
     if (brute) {
       bindDynamic(brute.anchor, brute.getter);
@@ -339,4 +397,5 @@
     raf(() => { scheduled = false; processRoot(document); });
   });
   mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+
 })();
