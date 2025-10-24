@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         Pylon: Hotel-Manager & ERP Button (no exposed API key)
+// @name         Pylon: Hotel-Manager & ERP Button (ERP uses erp_res_partner_id)
 // @namespace    https://seekda.com
-// @version      1.4.0
-// @description  Fügt unter der Hotel-ID eine eigene Row mit zwei Buttons ein (HM & ERP). API-Key wird nicht im Script gespeichert — Nutzer setzt ihn einmal per Menü.
+// @version      1.5.0
+// @description  Fügt unter der Hotel-ID eine eigene Row mit zwei Buttons ein (HM & ERP). ERP-Link nutzt erp_res_partner_id, angezeigt wird account_partner_id.
 // @match        https://app.usepylon.com/issues/*
 // @run-at       document-idle
-// @author       you
+// @author       Seekda
 // @updateURL    https://raw.githubusercontent.com/seekda/pylon-userscripts/main/hotel-manager-btn_erp-btn.user.js
 // @downloadURL  https://raw.githubusercontent.com/seekda/pylon-userscripts/main/hotel-manager-btn_erp-btn.user.js
 // @grant        GM_xmlhttpRequest
@@ -23,21 +23,19 @@
   const ID_REGEX_INLINE = /([A-Za-z0-9_-]{3,})/;
   const VALID_ID_REGEX = /^[A-Za-z0-9_-]{3,}$/;
   const HM_BASE = "https://hotels.seekda.com/";
-  // NOTE: API key is NOT hardcoded. We'll build the analytics URL using the stored key.
   const ANALYTICS_BASE = "https://analytics.seekda.com/api/queries/2983/results.json";
+  const STORAGE_KEY = "pylon_analytics_api_key";
+  const CACHE_KEY = "_pylon_erp_cache";
 
   const buildHmUrl = id => `${HM_BASE}~/cm/${encodeURIComponent(id)}`;
   const norm = s => (s || "").replace(/\s+/g, " ").trim();
 
-  // Helpers for API key storage & menu
-  const STORAGE_KEY = "pylon_analytics_api_key";
-
+  // === API Key Management ===
   function getStoredApiKey() {
     try {
       const k = GM_getValue(STORAGE_KEY, "");
       return typeof k === "string" ? k.trim() : "";
-    } catch (e) {
-      console.warn("Could not read stored API key", e);
+    } catch {
       return "";
     }
   }
@@ -52,39 +50,27 @@
 
   function buildAnalyticsUrlWithKey(key) {
     if (!key) return null;
-    // Append api_key as query param
     const url = new URL(ANALYTICS_BASE);
     url.searchParams.set("api_key", key);
     return url.toString();
   }
 
-  // Register menu to set/clear API key
   GM_registerMenuCommand("Set analytics API key", () => {
-    try {
-      const current = getStoredApiKey();
-      const val = prompt("Paste your analytics API key (will be stored locally):", current || "");
-      if (val === null) return; // user cancelled
-      setStoredApiKey(val);
-      alert(val ? "API key saved (local)." : "API key cleared.");
-      // optionally clear cache when key changed
-      try { localStorage.removeItem("_pylon_erp_cache"); } catch {}
-      // trigger a scan to update buttons
-      requestAnimationFrame(() => processRoot(document));
-    } catch (e) {
-      console.error(e);
-      alert("Failed to save API key in this userscript environment.");
-    }
+    const current = getStoredApiKey();
+    const val = prompt("Paste your analytics API key (will be stored locally):", current || "");
+    if (val === null) return;
+    setStoredApiKey(val);
+    alert(val ? "API key saved (local)." : "API key cleared.");
+    try { localStorage.removeItem(CACHE_KEY); } catch {}
+    requestAnimationFrame(() => processRoot(document));
   });
 
-  // === Helpers ===
+  // === DOM Helpers ===
   const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const raf = fn => requestAnimationFrame(fn);
   const textsLower = HOTEL_ID_TEXTS.map(t => t.toLowerCase());
   const looksLikeHotelLabel = el => textsLower.includes(norm(el.textContent).toLowerCase());
 
-  // ... (findFieldRow, closestRow, createCompanionRow, etc. — unchanged) ...
-
-  // findFieldRow (unchanged)
   function findFieldRow(el) {
     if (!el) return null;
     let cur = el;
@@ -154,7 +140,6 @@
 
     row.appendChild(left);
     row.appendChild(right);
-
     return row;
   }
 
@@ -170,6 +155,7 @@
     return row;
   }
 
+  // === Button Logic ===
   function setHmButton(row, hotelId) {
     const btn = row.querySelector('a[data-hotel-manager-link]');
     if (!btn) return;
@@ -201,15 +187,19 @@
     btn.title = "Lade ERP-Link …";
   }
 
-  function setErpButtonReady(row, partnerId) {
+  function setErpButtonReady(row, accountId, erpId) {
     const btn = row.querySelector('a[data-erp-link]');
     if (!btn) return;
-    btn.textContent = `🧑‍🤝‍🧑 Partner ${partnerId}`;
-    btn.href = `https://erp.seekda.com/web#id=${partnerId}&view_type=form&model=res.partner`;
+
+    // Anzeige: account_partner_id
+    btn.textContent = `🧑‍🤝‍🧑 Partner ${accountId}`;
+
+    // Linkziel: erp_res_partner_id
+    btn.href = `https://erp.seekda.com/web#id=${erpId}&view_type=form&model=res.partner`;
     btn.setAttribute("aria-disabled", "false");
     btn.style.opacity = "1";
     btn.style.pointerEvents = "auto";
-    btn.title = `Öffnen: Partner ${partnerId}`;
+    btn.title = `Öffnen: ERP Partner ${erpId}`;
   }
 
   function setErpButtonDisabled(row, reason = "nicht gefunden") {
@@ -223,11 +213,11 @@
     btn.title = `ERP-Link ${reason}`;
   }
 
-  // === Cache ERP ===
-  const CACHE_KEY = "_pylon_erp_cache";
+  // === Cache ===
   const saveCache = map => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(map))); } catch {} };
   const loadCache = () => { try { return new Map(Object.entries(JSON.parse(localStorage.getItem(CACHE_KEY) || "{}"))); } catch { return new Map(); } };
 
+  // === Fetch ERP data (now includes both IDs) ===
   async function fetchErpData() {
     const cached = loadCache();
     if (cached.size > 0) return cached;
@@ -235,7 +225,6 @@
       const apiKey = getStoredApiKey();
       const analyticsUrl = buildAnalyticsUrlWithKey(apiKey);
       if (!analyticsUrl) {
-        // no key configured -> return empty map
         console.warn("No analytics API key configured for ERP lookup.");
         return new Map();
       }
@@ -250,12 +239,16 @@
           ontimeout: () => reject(new Error("timeout"))
         });
       });
+
       const rows = r?.query_result?.data?.rows || [];
       const map = new Map();
       rows.forEach(item => {
         const hid = norm(item.name);
-        const pid = (item.account_partner_id ?? "").toString().trim();
-        if (hid && pid) map.set(hid, pid);
+        const accountId = (item.account_partner_id ?? "").toString().trim();
+        const erpId = (item.erp_res_partner_id ?? "").toString().trim();
+        if (hid && accountId && erpId) {
+          map.set(hid, { account: accountId, erp: erpId });
+        }
       });
       saveCache(map);
       return map;
@@ -280,11 +273,15 @@
 
     setErpButtonLoading(row);
     const map = await fetchErpData();
-    const partnerId = map.get(clean);
-    if (partnerId) setErpButtonReady(row, partnerId);
-    else setErpButtonDisabled(row, "nicht gefunden");
+    const data = map.get(clean);
+    if (data && data.account && data.erp) {
+      setErpButtonReady(row, data.account, data.erp);
+    } else {
+      setErpButtonDisabled(row, "nicht gefunden");
+    }
   }
 
+  // === Debounce + Combined ===
   const debounceMap = new Map();
   function debounce(key, fn, delay = 400) {
     clearTimeout(debounceMap.get(key));
@@ -297,7 +294,7 @@
     debounce(row, () => updateErpButton(row, hotelId), 450);
   }
 
-  // === Feld-/Wert-Finder (mehrstufig) ===
+  // === Feld-/Wert-Finder ===
   function getHotelFieldCandidates(root=document) {
     const sel = 'input[placeholder],textarea[placeholder],input[name],textarea[name],input[aria-label],textarea[aria-label]';
     return qsa(sel, root).filter(el => {
@@ -310,17 +307,14 @@
 
   function findValueNear(el) {
     if (/^(INPUT|TEXTAREA)$/.test(el.tagName)) return () => el.value || "";
-
     const row = findFieldRow(el) || closestRow(el);
     const valEl = row?.querySelector?.('input,textarea,[data-testid*="value"],[data-readonly-value],.value,.truncate,.whitespace-nowrap,span,div,code,kbd');
     if (valEl) {
       if (/^(INPUT|TEXTAREA)$/.test(valEl.tagName)) return () => valEl.value || "";
       return () => norm(valEl.textContent);
     }
-
     const sib = el.nextElementSibling;
     if (sib) return () => norm(sib.textContent);
-
     return () => norm(el.textContent);
   }
 
@@ -352,18 +346,14 @@
     return null;
   }
 
-  // Row binden + live aktualisieren
   function bindDynamic(anchor, getter) {
     const companion = findOrCreateCompanionRow(anchor);
     if (!companion) return;
-
     const apply = () => setBothButtons(companion, getter() || "");
     apply();
-
     const fieldRow = findFieldRow(anchor) || closestRow(anchor) || anchor;
     const mo = new MutationObserver(apply);
     mo.observe(fieldRow, { childList: true, subtree: true, characterData: true, attributes: true });
-
     if (/^(INPUT|TEXTAREA)$/.test(anchor.tagName)) {
       anchor.addEventListener("input", apply, { passive: true });
       anchor.addEventListener("change", apply, { passive: true });
@@ -387,9 +377,8 @@
     }
   }
 
-  // Initial + DOM-Änderungen
+  // === Initial start ===
   processRoot(document);
-
   let scheduled = false;
   const mo = new MutationObserver(() => {
     if (scheduled) return;
