@@ -10,11 +10,11 @@
 ## 2. Get the User Script from GitHub
 
 Download or open the script directly from GitHub:
-[https://github.com/seekda/pylon-userscripts/raw/refs/heads/main/hotel-manager-btn_erp-btn.user.js](https://github.com/seekda/pylon-userscripts/raw/refs/heads/main/hotel-manager-btn_erp-btn.user.js)
+[hotel-manager-btn_erp-btn.user.js](https://github.com/seekda/pylon-userscripts/raw/refs/heads/main/hotel-manager-btn_erp-btn.user.js)
 
 After installing the extension and opening the above link, you will be redirected to the **script installation page** – simply click **Install**.
 
-*(screenshot: `image-20250828-074715.png`)*
+![Script Installation](https://github.com/seekda/pylon-userscripts/raw/refs/heads/main/screenshots/image-20250828-074715.png)
 
 ---
 
@@ -54,7 +54,7 @@ Then:
 2. Click on the **Tampermonkey Extension icon** → open the installed script.
 3. Add the obtained **API Key** inside the script configuration.
 
-*(screenshot: `image-20250923-125058.png`)*
+![Add API Key](https://github.com/seekda/pylon-userscripts/raw/refs/heads/main/screenshots/image-20250923-125058.png)
 
 4. Refresh **Pylon** again → both buttons should now work.
 
@@ -65,4 +65,4 @@ Then:
 This setup improves on the previous custom extension:
 
 * You no longer need to reinstall updates manually — script updates are **pushed automatically**.
-* The new version also adds a **“ERP” button**, which retrieves the partner by querying the first Hotel-Manager page and extracting it from the icon button there.
+* The new version also adds a **“Verrechnungspartner” button**, which retrieves the partner by querying the first Hotel-Manager page and extracting it from the icon button there.
