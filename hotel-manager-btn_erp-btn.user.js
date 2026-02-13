@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Pylon: Hotel-Manager & ERP Button
 // @namespace    https://seekda.com
-// @version      1.6.6
+// @version      1.6.7
 // @description  Fügt unter der Hotel-ID eine eigene Row mit zwei Buttons ein (HM & ERP). ERP-Link nutzt erp_res_partner_id, angezeigt wird account_partner_id.
-// @match        https://app.usepylon.com/issues/*
+// @match        https://app.usepylon.com/support/*
 // @run-at       document-idle
 // @author       Seekda
 // @updateURL    https://raw.githubusercontent.com/seekda/pylon-userscripts/main/hotel-manager-btn_erp-btn.user.js
