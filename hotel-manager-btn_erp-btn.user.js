@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pylon: Hotel-Manager, ERP & Time Tracker
 // @namespace    https://seekda.com
-// @version      1.7.0
+// @version      1.7.2
 // @description  HM & ERP Buttons unter Hotel-ID; Time-Tracker-Button darunter (öffnet HTS mit aktuellem Ticket + User).
 // @match        https://app.usepylon.com/support/*
 // @run-at       document-start
@@ -24,9 +24,11 @@
   const HTS_EMBED_BASE = "https://hts.seekda.com/embed/time-tracker";
   const PYLON_HTS_EMAIL_ATTR = "data-pylon-hts-email";
   const PYLON_HTS_ISSUE_ATTR = "data-pylon-hts-issue-id";
+  const PYLON_HTS_TICKET_NUMBER_ATTR = "data-pylon-hts-ticket-number";
 
   let currentUserEmail = null;
   let currentIssueId = null;
+  let currentTicketNumber = null;
   let timeTrackerPollTimer = null;
 
   function normalizeEmail(val) {
@@ -39,8 +41,10 @@
     const root = document.documentElement;
     const emailRaw = root.getAttribute(PYLON_HTS_EMAIL_ATTR);
     const issueIdRaw = root.getAttribute(PYLON_HTS_ISSUE_ATTR);
+    const ticketNumberRaw = root.getAttribute(PYLON_HTS_TICKET_NUMBER_ATTR);
     const email = normalizeEmail(emailRaw);
     const issueId = issueIdRaw && issueIdRaw.trim ? issueIdRaw.trim() : issueIdRaw;
+    const ticketNumber = ticketNumberRaw != null && ticketNumberRaw !== "" ? String(ticketNumberRaw).trim() : null;
     let changed = false;
     if (email && email !== currentUserEmail) {
       currentUserEmail = email;
@@ -50,6 +54,10 @@
       currentIssueId = issueId;
       changed = true;
     }
+    if (ticketNumber !== currentTicketNumber) {
+      currentTicketNumber = ticketNumber;
+      changed = true;
+    }
     if (changed) maybeUpdateTimeTracker();
   }
 
@@ -57,6 +65,12 @@
     const params = new URLSearchParams();
     if (currentIssueId) params.set("issue_id", currentIssueId);
     if (currentUserEmail) params.set("actor_email", currentUserEmail);
+    // Ticket number: prefer Pylon ticket page URL param (issueNumber=25969), else GraphQL/DOM
+    const issueNumberFromUrl = typeof window !== "undefined" && window.location && window.location.search
+      ? new URLSearchParams(window.location.search).get("issueNumber")
+      : null;
+    const ticketNumberForLink = (issueNumberFromUrl && issueNumberFromUrl.trim()) || currentTicketNumber;
+    if (ticketNumberForLink) params.set("ticket_number", String(ticketNumberForLink).trim());
     const qs = params.toString();
     return qs ? `${HTS_EMBED_BASE}?${qs}` : HTS_EMBED_BASE;
   }
@@ -101,7 +115,7 @@
       "return origFetch.apply(this,arguments).then(function(res){",
       "var c=res.clone();",
       "if(u&&u.indexOf('graph.usepylon.com/auth')!==-1){c.text().then(function(t){try{var d=JSON.parse(t);if(d&&typeof d.email==='string'){var e=d.email.trim();if(e.indexOf('@')!==-1){r.setAttribute('data-pylon-hts-email',e);}}}catch(e){}}).catch(function(){});}",
-      "if(u&&u.indexOf('graph.usepylon.com/graphql')!==-1){c.text().then(function(t){try{var d=JSON.parse(t);var id=d&&d.data&&d.data.organization&&d.data.organization.issue&&d.data.organization.issue.id;if(id&&typeof id==='string'){r.setAttribute('data-pylon-hts-issue-id',id);}}catch(e){}}).catch(function(){});}",
+      "if(u&&u.indexOf('graph.usepylon.com/graphql')!==-1){c.text().then(function(t){try{var d=JSON.parse(t);var o=d&&d.data&&d.data.organization&&d.data.organization.issue;if(o){var id=o.id;if(id&&typeof id==='string'){r.setAttribute('data-pylon-hts-issue-id',id);}var num=o.ticketNumber!=null?o.ticketNumber:o.number;if(num!=null){r.setAttribute('data-pylon-hts-ticket-number',String(num));}else{r.removeAttribute('data-pylon-hts-ticket-number');}}}catch(e){}}).catch(function(){});}",
       "return res;});};}",
       "var O=window.XMLHttpRequest;",
       "if(O){",
@@ -110,7 +124,7 @@
       "var open=x.open;x.open=function(m,u){url=u;return open.apply(this,arguments);};",
       "x.addEventListener('load',function(){",
       "if(url&&url.indexOf('graph.usepylon.com/auth')!==-1&&x.responseText){try{var d=JSON.parse(x.responseText);if(d&&typeof d.email==='string'){var e=d.email.trim();if(e.indexOf('@')!==-1){r.setAttribute('data-pylon-hts-email',e);}}}catch(e){}}",
-      "if(url&&url.indexOf('graph.usepylon.com/graphql')!==-1&&x.responseText){try{var d=JSON.parse(x.responseText);var id=d&&d.data&&d.data.organization&&d.data.organization.issue&&d.data.organization.issue.id;if(id&&typeof id==='string'){r.setAttribute('data-pylon-hts-issue-id',id);}}catch(e){}}",
+      "if(url&&url.indexOf('graph.usepylon.com/graphql')!==-1&&x.responseText){try{var d=JSON.parse(x.responseText);var o=d&&d.data&&d.data.organization&&d.data.organization.issue;if(o){var id=o.id;if(id&&typeof id==='string'){r.setAttribute('data-pylon-hts-issue-id',id);}var num=o.ticketNumber!=null?o.ticketNumber:o.number;if(num!=null){r.setAttribute('data-pylon-hts-ticket-number',String(num));}else{r.removeAttribute('data-pylon-hts-ticket-number');}}}catch(e){}}",
       "});",
       "return x;};}",
       "})();"
